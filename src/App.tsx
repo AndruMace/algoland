@@ -66,7 +66,7 @@ function example() {
             shadow-mapSize={[2048, 2048]}
           />
           <Physics gravity={[0, -9.81, 0]}>
-            <Player />
+            <Player controlsRef={controlsRef} />
             <Cubes />
             <Ground />
           </Physics>

@@ -1,14 +1,17 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, RefObject } from 'react'
 import { Vector3 } from 'three'
 import { useFrame } from '@react-three/fiber'
 import { PointerLockControls } from '@react-three/drei'
 import { RigidBody, CapsuleCollider } from '@react-three/rapier'
 
-export function Player() {
+interface PlayerProps {
+  controlsRef: RefObject<any>;
+}
+
+export function Player({ controlsRef }: PlayerProps) {
   const playerRef = useRef<any>(null!)
   const moveDirection = useRef(new Vector3())
   const isJumping = useRef(false)
-  const controlsRef = useRef<any>(null!)
   const [canLock, setCanLock] = useState(true)
   const [isLocked, setIsLocked] = useState(false)
 
