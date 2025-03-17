@@ -7,54 +7,64 @@ import { PointerLockControls as PointerLockControlsImpl } from 'three-stdlib'
 
 export function Player() {
   const playerRef = useRef<any>(null)
-  const moveDirection = useRef(new Vector3())
   const controlsRef = useRef<PointerLockControlsImpl>(null)
   const [isLocked, setIsLocked] = useState(false)
+  const keysPressed = useRef<Set<string>>(new Set())
+  const lastPosition = useRef<[number, number, number]>([0, 2, 10])
 
+  // Reset keys on component mount
   useEffect(() => {
-    // Initialize player position
-    if (playerRef.current) {
-      playerRef.current.setTranslation({ x: 0, y: 2, z: 0 })
-    }
+    keysPressed.current.clear();
+    
+    return () => {
+      keysPressed.current.clear();
+    };
+  }, []);
 
+  // Main event listeners
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isLocked) return
-      const speed = 4
-      switch(e.key.toLowerCase()) {
-        case 'w': moveDirection.current.z = speed; break
-        case 's': moveDirection.current.z = -speed; break
-        case 'a': moveDirection.current.x = -speed; break
-        case 'd': moveDirection.current.x = speed; break
-        case ' ':
-          if (playerRef.current) {
-            playerRef.current.applyImpulse({ x: 0, y: 5, z: 0 })
-          }
-          break
+      // Only process keys if the pointer is locked and we're in the game
+      if (!isLocked) return;
+      
+      keysPressed.current.add(e.key.toLowerCase())
+      
+      // Handle jumping
+      if (e.key === ' ' && playerRef.current) {
+        // Only jump if we're on or near the ground
+        const velocity = playerRef.current.linvel()
+        if (Math.abs(velocity.y) < 0.1) {
+          playerRef.current.setLinvel({ x: velocity.x, y: 5, z: velocity.z })
+        }
       }
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (!isLocked) return
-      switch(e.key.toLowerCase()) {
-        case 'w':
-        case 's': moveDirection.current.z = 0; break
-        case 'a':
-        case 'd': moveDirection.current.x = 0; break
+      keysPressed.current.delete(e.key.toLowerCase())
+    }
+
+    const handleClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.code-editor-container')) {
+        controlsRef.current?.lock()
       }
     }
 
-    // Click handler to lock controls
-    const handleClick = () => {
-      if (controlsRef.current && !isLocked) {
-        controlsRef.current.lock()
-      }
-    }
-
-    // Handle pointer lock change from the document
     const handleLockChange = () => {
-      const locked = document.pointerLockElement !== null
-      setIsLocked(locked)
-      if (!locked) moveDirection.current.set(0, 0, 0)
+      const locked = document.pointerLockElement !== null;
+      
+      if (isLocked && !locked) {
+        // Switching from locked to unlocked
+        // Store position before unlocking
+        if (playerRef.current) {
+          const pos = playerRef.current.translation();
+          lastPosition.current = [pos.x, pos.y, pos.z];
+        }
+        
+        // Clear keys when unlocking
+        keysPressed.current.clear();
+      }
+      
+      setIsLocked(locked);
     }
 
     document.addEventListener('keydown', handleKeyDown)
@@ -70,44 +80,68 @@ export function Player() {
     }
   }, [isLocked])
 
+  // Restore position on lock change
+  useEffect(() => {
+    if (isLocked && playerRef.current) {
+      // We're now locked, restore the position
+      const [x, y, z] = lastPosition.current;
+      playerRef.current.setTranslation({ x, y, z });
+    }
+  }, [isLocked]);
+
   useFrame((state) => {
-    if (playerRef.current && isLocked) {
-      const cameraDirection = new Vector3()
-      state.camera.getWorldDirection(cameraDirection)
-      
-      const rightVector = new Vector3()
-      rightVector.crossVectors(cameraDirection, new Vector3(0, 1, 0)).normalize()
-      
-      const forwardVector = new Vector3()
-      forwardVector.crossVectors(rightVector, new Vector3(0, 1, 0)).normalize()
+    if (!playerRef.current || !isLocked) return
 
-      const finalMovement = new Vector3()
-      finalMovement.addScaledVector(rightVector, moveDirection.current.x)
-      finalMovement.addScaledVector(forwardVector, -moveDirection.current.z)
-      
-      const linvel = playerRef.current.linvel()
-      playerRef.current.setLinvel({
-        x: finalMovement.x,
-        y: linvel.y,
-        z: finalMovement.z
+    const speed = 4
+    const position = playerRef.current.translation()
+    
+    // Update camera
+    state.camera.position.set(position.x, position.y + 1.5, position.z)
+
+    // Get movement direction
+    const cameraDirection = new Vector3()
+    state.camera.getWorldDirection(cameraDirection)
+    const forward = new Vector3(cameraDirection.x, 0, cameraDirection.z).normalize()
+    const right = new Vector3(-forward.z, 0, forward.x)
+
+    // Calculate movement
+    const movement = new Vector3()
+    if (keysPressed.current.has('w')) movement.add(forward)
+    if (keysPressed.current.has('s')) movement.sub(forward)
+    if (keysPressed.current.has('a')) movement.sub(right)
+    if (keysPressed.current.has('d')) movement.add(right)
+    
+    // Apply movement while preserving vertical velocity
+    if (movement.length() > 0) {
+      movement.normalize().multiplyScalar(speed)
+      const velocity = playerRef.current.linvel()
+      playerRef.current.setLinvel({ 
+        x: movement.x, 
+        y: velocity.y, // Preserve vertical velocity for gravity/jumping
+        z: movement.z 
       })
-
-      const position = playerRef.current.translation()
-      state.camera.position.set(position.x, position.y + 1.5, position.z)
+    } else {
+      // Stop horizontal movement when no keys are pressed
+      const velocity = playerRef.current.linvel()
+      playerRef.current.setLinvel({ 
+        x: 0, 
+        y: velocity.y, 
+        z: 0 
+      })
     }
   })
 
   return (
     <>
-      <PointerLockControls ref={controlsRef} />
+      <PointerLockControls ref={controlsRef} selector=".game-area" />
       <RigidBody
         ref={playerRef}
-        colliders={false}
-        position={[0, 2, 0]}
+        type="dynamic"
+        position={[0, 2, 10]}
         enabledRotations={[false, false, false]}
         lockRotations
-        type="dynamic"
-        linearDamping={0.5}
+        friction={0.5}
+        mass={1}
       >
         <CapsuleCollider args={[0.5, 0.5]} />
       </RigidBody>
